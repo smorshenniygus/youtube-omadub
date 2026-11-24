@@ -5,6 +5,7 @@ transformers
 numpy
 scipy
 soundfile
+pyloudnorm
 av
 resemblyzer
 sherpa-onnx

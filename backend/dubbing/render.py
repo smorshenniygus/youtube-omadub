@@ -117,7 +117,10 @@ def _write_atomic_pcm16(destination, pcm_bytes, sample_rate, suffix='.fitting.wa
 def fit_audio_array(y, in_sr, destination, window_s, metrics=None, max_tempo=None):
     """Fast (~15ms) in-process PyAV + pyloudnorm + NumPy mastering directly from a float32 array (0 intermediate disk I/O)."""
     import numpy as np
-    import pyloudnorm as pyln
+    try:
+        import pyloudnorm as pyln
+    except ImportError:
+        pyln = None
 
     destination = Path(destination)
     y = np.asarray(y, dtype=np.float32)
@@ -163,7 +166,7 @@ def fit_audio_array(y, in_sr, destination, window_s, metrics=None, max_tempo=Non
 
     # Measure integrated EBU R128 loudness once and apply exact linear gain (matches 2-pass linear=true).
     lufs = float('-inf')
-    if len(mastered) >= int(SAMPLE_RATE * 0.4):
+    if pyln is not None and len(mastered) >= int(SAMPLE_RATE * 0.4):
         try:
             meter = pyln.Meter(SAMPLE_RATE)
             lufs = float(meter.integrated_loudness(mastered.astype(np.float64)))

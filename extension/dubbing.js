@@ -173,6 +173,7 @@
       this.epoch = 0;
       this.justSeeked = false;
       this.playStarted = null;
+      this.lastSeek = null;
       this.currentSegmentId = null;
       this.prefetchRetries = new Map();
       this.pauseController = new PauseController(video);
@@ -228,6 +229,7 @@
         this.segmentMap.set(this.segments[i].id, this.segments[i]);
       }
       this.lastTickTime = NaN;
+      this.lastSeek = null;
       if (this.active) this.tick();
     }
 
@@ -268,7 +270,17 @@
     async start() {
       if (this.active) return;
       const epoch = ++this.epoch;
-      const context = mixContext || (mixContext = new AudioContext());
+      if (!mixContext) {
+        try {
+          // Use 'playback' latency hint so PipeWire/WASAPI/CoreAudio keep a glitch-free
+          // playback buffer (~20-40ms) instead of forcing a tiny ~3ms 'interactive' quantum
+          // that crackles/rasps while local GPU/CPU TTS runs in the background.
+          mixContext = new AudioContext({ latencyHint: 'playback' });
+        } catch {
+          mixContext = new AudioContext();
+        }
+      }
+      const context = mixContext;
       // Unlock during the Listen gesture, before capturing the native element.
       // A denied unlock must leave ordinary YouTube output untouched.
       await context.resume();
@@ -319,7 +331,7 @@
 
       // Single pass over loaded clips updates volume/mute and pauses inactive audio.
       for (const audio of this.clips.audios()) {
-        if (audio.volume !== targetVolume) audio.volume = targetVolume;
+        if (Math.abs(audio.volume - targetVolume) > 1e-4) audio.volume = targetVolume;
         if (audio.muted !== v.muted) audio.muted = v.muted;
         if (audio !== activeAudio || v.paused || v.seeking || ad || this.waiting) {
           audio.pause();
@@ -373,13 +385,24 @@
       const startupGrace = Boolean(
         this.playStarted &&
           this.playStarted.id === s.id &&
-          Date.now() - this.playStarted.at < 250 &&
-          clip.currentTime < 0.05 &&
-          offset < 0.35
+          Date.now() - this.playStarted.at < 450 &&
+          clip.currentTime < 0.08 &&
+          offset < 0.55
       );
-      const driftLimit = this.justSeeked ? 0.05 : 0.22;
-      if (!startupGrace && Math.abs(clip.currentTime - offset) > driftLimit) {
+      // Seek tightly before starting a paused clip or right after a user timeline scrub,
+      // but tolerate normal audio-sink latency (Bluetooth/WASAPI/PipeWire) during active playback
+      // so the voice is never repeatedly re-seeked and chopped mid-phrase.
+      const driftLimit = this.justSeeked || clip.paused ? 0.05 : 0.35;
+      const seekCoolingDown = Boolean(
+        !this.justSeeked &&
+          !clip.paused &&
+          this.lastSeek &&
+          this.lastSeek.id === s.id &&
+          Date.now() - this.lastSeek.at < 1500
+      );
+      if (!startupGrace && !seekCoolingDown && Math.abs(clip.currentTime - offset) > driftLimit) {
         this.justSeeked = false;
+        this.lastSeek = { id: s.id, at: Date.now() };
         if (this.clips.seek(s.id, offset)) return;
       }
       this.justSeeked = false;
@@ -396,6 +419,7 @@
       this.epoch++;
       this.justSeeked = false;
       this.playStarted = null;
+      this.lastSeek = null;
       this.currentSegmentId = null;
       this.prefetchRetries.clear();
       this.pauseController.stop();

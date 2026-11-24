@@ -109,3 +109,27 @@ test('empty or whitespace translation falls back safely instead of aborting job'
  assert.equal(posted.length,1);
  assert.equal(posted[0][0].text_ru,'♪');
 });
+
+test('Playback uses playback AudioContext latencyHint and avoids choppy mid-phrase seeks on normal sink drift',async()=>{
+ let ctxOptions=null;
+ class InspectAudioContext extends AudioContextFixture {
+  constructor(opts){super();ctxOptions=opts;}
+ }
+ const {Playback}=load({AudioContext:InspectAudioContext});
+ const v=new Media(),a=new Media();
+ let seeks=0,cur=0;
+ Object.defineProperty(a,'currentTime',{get:()=>cur,set:val=>{seeks++;cur=val;}});
+ const p=new Playback(v,{load:async()=>'blob:ok',makeAudio:()=>a,isAd:()=>false});
+ p.setSegments([{id:'s',start:0,end:10,audio_duration:10,state:'ready'}]);
+ await p.start();await new Promise(r=>setImmediate(r));
+ assert.equal(ctxOptions?.latencyHint,'playback');
+ // Simulate 0.26s playback clock drift while actively playing (common on PipeWire/WASAPI/Bluetooth)
+ cur=2.0;v.currentTime=2.26;
+ const seeksBefore=seeks;
+ p.tick();
+ assert.equal(seeks,seeksBefore);
+ // Explicit timeline seek still resyncs tightly within 0.05s
+ v.currentTime=5.0;v.dispatchEvent(new Event('seeked'));
+ assert.equal(cur,5.0);
+ p.stop();
+});
