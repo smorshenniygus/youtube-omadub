@@ -9,6 +9,8 @@ ExecStart=%h/voxdub/backend/.venv/bin/python %h/voxdub/backend/dubbing_service.p
 Restart=on-failure
 RestartSec=3
 Environment=PYTHONDONTWRITEBYTECODE=1
+# Optional: use IPv4 for yt-dlp on networks with broken IPv6 routing.
+# Environment=VOXDUB_YTDLP_FORCE_IPV4=1
 # Optional GPU tuning overrides (defaults to auto-detect):
 # Environment=VOXDUB_CUDA_GRAPHS=auto
 # Environment=VOXDUB_MAX_BATCH=auto

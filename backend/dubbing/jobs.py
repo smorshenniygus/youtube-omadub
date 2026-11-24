@@ -69,6 +69,9 @@ class PreparationCancelled(Exception):
 
 def number(v):return type(v) in (int,float) and math.isfinite(v)
 
+def _is_timing_error(error):
+    return isinstance(error, str) and error.startswith('TimingFitError:')
+
 def _timing_feedback(segment, window, raw_seconds, attempt):
     history, seen = [], set()
     for entry in segment.get('generation_attempts', [])[-8:]:
@@ -323,11 +326,17 @@ class JobManager:
             j=self._get(jid)
             if ClientLeases.expire(j, time.time()):self._save(j)
             duration=j['payload']['duration'];segments=j['segments'];ranges=[]
+            timing_errors = {s['id'] for s in segments if s['state'] == 'error' and _is_timing_error(s.get('error'))}
+            # A phrase that exhausted timing retries is playable as a gap when
+            # other phrases can still provide dubbing. Keep the persisted error for retries.
+            skipped = timing_errors if len(timing_errors) < len(segments) else set()
+            fatal_segment = next((s for s in segments if s['state'] == 'error' and s['id'] not in skipped), None)
+            fatal_error = j['error'] or (fatal_segment or {}).get('error')
             if j['prepared']:
                 cursor=0
                 for s in segments:
                     if s['start']>cursor:ranges.append([cursor,s['start']])
-                    if s['state']=='ready':ranges.append([s['start'],s['end']])
+                    if s['state']=='ready' or s['id'] in skipped:ranges.append([s['start'],s['end']])
                     cursor=s['end']
                 if cursor<duration:ranges.append([cursor,duration])
             merged=[]
@@ -342,10 +351,10 @@ class JobManager:
             required_buffer_s=min(300,max(0.0,duration-ready_from))
             ready=sum(s['state']=='ready' for s in segments)
             if j['cancelled']:status='cancelled'
-            elif j['error'] or any(s['state']=='error' for s in segments):status='failed'
+            elif j['error'] or fatal_segment is not None:status='failed'
             elif not j['prepared']:status='preparing'
             elif j.get('gpu_wait'):status='waiting_gpu'
-            elif ready==len(segments):status='complete'
+            elif ready+len(skipped)==len(segments):status='complete'
             elif any(s['state'] in ('pending','generating') for s in segments):status='generating'
             elif any(s['state'] in ('needs_edit','editing') for s in segments):status='editing'
             else:status='waiting_translation'
@@ -359,6 +368,8 @@ class JobManager:
                 }
             for s in segments:
                 row={k:s[k] for k in ('id','start','end','text','text_ru','speaker','state')}
+                if s['id'] in skipped:
+                    row['state']='skipped'
                 if s.get('error'):row['error']=s['error']
                 if s.get('metrics'):row['metrics']=dict(s['metrics'])
                 em=s.get('edit_metrics')
@@ -382,7 +393,7 @@ class JobManager:
                 source_metadata=metadata,last_model_load_seconds=j.get('last_model_load_seconds'),
                 ready_to_play=status not in ('cancelled','failed') and j['prepared'] and buffered_s>=required_buffer_s,
                 required_buffer_s=required_buffer_s,
-                total_segments=len(segments),ready_segments=ready,error=j['error'] or next((s.get('error') for s in segments if s['state']=='error'),None),segments=public)
+                total_segments=len(segments),ready_segments=ready,skipped_segments=len(skipped),error=fatal_error,segments=public)
     def translations(self,jid,items):
         if not isinstance(items,list) or not 1<=len(items)<=1000:raise ValueError('invalid translation batch')
         with self.lock:
@@ -611,7 +622,10 @@ class JobManager:
                 last_progress_save = [0.0, None]
                 def progress(value):
                     if self.stop.is_set() or j['cancelled']:raise PreparationCancelled()
-                    filtered={k:v for k,v in value.items() if k in ('phase','seconds','analyzed_until','duration','total_segments')}
+                    filtered = {k: v for k, v in value.items() if k in (
+                        'phase', 'seconds', 'analyzed_until', 'duration', 'total_segments',
+                        'downloaded_bytes', 'total_bytes', 'total_estimated',
+                    )}
                     now=time.monotonic()
                     phase=filtered.get('phase')
                     should_save=(phase!=last_progress_save[1]) or (now-last_progress_save[0]>=2.0)

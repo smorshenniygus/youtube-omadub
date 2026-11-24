@@ -91,6 +91,20 @@ class SourceTests(unittest.TestCase):
         with self.assertRaises(InterruptedError):
             self.provider._run([sys.executable,'-c','import time; time.sleep(30)'],cancel)
 
+    def test_download_reports_bytes_before_the_subprocess_finishes(self):
+        updates = []
+        script = (
+            "import sys,time; "
+            "print('VOXDUB_DOWNLOAD 120 NA 400', file=sys.stderr, flush=True); "
+            "time.sleep(1.15); "
+            "print('VOXDUB_DOWNLOAD 400 400 NA', flush=True)"
+        )
+        self.provider._run([sys.executable, '-c', script], updates.append, download=True)
+        self.assertEqual(updates, [
+            {'phase': 'source_download', 'downloaded_bytes': 120, 'total_bytes': 400, 'total_estimated': True},
+            {'phase': 'source_download', 'downloaded_bytes': 400, 'total_bytes': 400},
+        ])
+
     def test_groups_references_and_determinism(self):
         one=self.provider.prepare('f0J_EeW42Lo',self.cues,self.root/'job')
         two=self.provider.prepare('f0J_EeW42Lo',self.cues,self.root/'job')

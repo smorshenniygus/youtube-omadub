@@ -22,6 +22,7 @@ from .phrases import group_speech_cues
 from . import short_speech, continuation_speech
 
 _VIDEO = re.compile(r"[A-Za-z0-9_-]{11}\Z")
+_DOWNLOAD_PROGRESS = re.compile(rb"^VOXDUB_DOWNLOAD ([0-9]+) ([0-9]+|NA) ([0-9]+|NA)$")
 _ENCODER_LOCK = threading.Lock()
 _VIDEO_LOCKS_GUARD = threading.Lock()
 _VIDEO_LOCKS: dict[str, threading.Lock] = {}
@@ -283,22 +284,35 @@ class SourceProvider:
         self.similarity_threshold = similarity_threshold
         self.allow_cuda = allow_cuda
 
-    def _run(self, args, progress=None):
+    def _run(self, args, progress=None, *, download=False):
         started = time.monotonic()
         process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+        status = dict(phase="source_download" if download else "source_io")
+
+        def report(stdout, stderr):
+            nonlocal status
+            if not progress:
+                return
+            if download:
+                update = self._download_progress(stdout) or self._download_progress(stderr)
+                if update is not None:
+                    status = dict(phase="source_download", **update)
+            progress(status.copy())
+
         try:
             while True:
                 try:
-                    _, stderr = process.communicate(timeout=1)
+                    stdout, stderr = process.communicate(timeout=1)
                     break
-                except subprocess.TimeoutExpired:
+                except subprocess.TimeoutExpired as exc:
                     if time.monotonic() - started > self.command_timeout:
                         raise SourceError("Source command timed out")
-                    if progress:
-                        progress(dict(phase="source_io"))
+                    report(exc.output, exc.stderr)
             if process.returncode:
                 # yt-dlp logs may contain expiring signed media URLs; keep errors bounded/private.
                 raise SourceError("Source command failed (%s, exit %s)" % (args[0], process.returncode))
+            if download:
+                report(stdout, stderr)
         except BaseException:
             if process.poll() is None:
                 try:
@@ -315,6 +329,22 @@ class SourceProvider:
                 process.communicate()
             raise
 
+    @staticmethod
+    def _download_progress(output):
+        # communicate() on timeout may end in the middle of a progress line.
+        for line in reversed((output or b"").rpartition(b"\n")[0].splitlines()):
+            match = _DOWNLOAD_PROGRESS.fullmatch(line)
+            if match:
+                downloaded, exact, estimated = match.groups()
+                count = int(downloaded)
+                result = dict(downloaded_bytes=count)
+                if exact != b"NA" and int(exact) >= max(count, 1):
+                    result["total_bytes"] = int(exact)
+                elif estimated != b"NA" and int(estimated) >= max(count, 1):
+                    result.update(total_bytes=int(estimated), total_estimated=True)
+                return result
+        return None
+
     def _source(self, video_id, progress=None):
         directory = self.cache_dir / video_id
         directory.mkdir(parents=True, exist_ok=True)
@@ -323,11 +353,14 @@ class SourceProvider:
             # Clean up any stray partial/previous container files before downloading.
             for stray in directory.glob("original.*"):
                 stray.unlink(missing_ok=True)
-            self._run(["yt-dlp", "--no-playlist", "--no-progress", "--concurrent-fragments", "4",
+            network_options = ["--force-ipv4"] if os.environ.get("VOXDUB_YTDLP_FORCE_IPV4") == "1" else []
+            self._run(["yt-dlp", *network_options, "--no-playlist", "--progress", "--newline", "--progress-delta", "0.5",
+                       "--progress-template", "download:VOXDUB_DOWNLOAD %(progress.downloaded_bytes)d "
+                       "%(progress.total_bytes)d %(progress.total_bytes_estimate)d", "--concurrent-fragments", "4",
                        "--socket-timeout", "30",
                        "--retries", "2", "--max-filesize", "2G", "-f", "bestaudio",
                        "-o", str(directory / "original.%(ext)s"),
-                       "https://www.youtube.com/watch?v=" + video_id], progress)
+                       "https://www.youtube.com/watch?v=" + video_id], progress, download=True)
             originals = sorted(p for p in directory.glob("original.*") if p.suffix not in (".part", ".ytdl"))
             if len(originals) != 1:
                 raise SourceError("Expected one complete original audio")
