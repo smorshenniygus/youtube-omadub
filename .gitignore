@@ -1,0 +1,19 @@
+# Python / virtual environments
+.venv*/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.cache/
+
+# Local runtime state, secrets, downloaded models
+backend/data/
+backend/models/
+extension/local-config.json
+*.env
+.env
+
+# OS / editor / local design scratch
+design/
+.DS_Store
+Thumbs.db

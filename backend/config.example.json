@@ -1,0 +1,9 @@
+{
+  "mode": "local_llm",
+  "base_url": "http://127.0.0.1:11434/v1",
+  "model": "qwen2.5:7b",
+  "api_key": "",
+  "fallback_model": "",
+  "structured_output": "json_object",
+  "unload_before_tts": true
+}

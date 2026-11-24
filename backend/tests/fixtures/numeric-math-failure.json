@@ -1,0 +1,110 @@
+{
+  "revision": "spoken-ru-v8-russian-cardinal-validation",
+  "items": [
+    {
+      "id": "s_942a883fddd5d5a97fb3",
+      "source": "If you take the log base 2 of both sides here and then negate, this is equivalent to saying that the number of bits allocated to a message, assuming perfect compression, is negative log base 2 of p, where p is the probability of occurring.",
+      "draft": "Если взять логарифмическую базу 2 обеих сторон здесь, а затем отрицать, это равносильно тому, что количество бит, выделенных для сообщения, предполагает идеальное сжатие, является отрицательной логарифмической базой 2 P, где P — вероятность возникновения.",
+      "window_s": 13.259999999999991,
+      "target_chars": 179
+    },
+    {
+      "id": "s_eb3d0a3347f24d7c0677",
+      "source": "This negative log expression is the fundamental formula for all of information theory. Everything up to this point is me trying to make this value feel like something you are inevitably drawn to by asking about perfect compression, rather than it feeling like some arbitrary definition that we start with.",
+      "draft": "Это отрицательное лог-выражение является фундаментальной формулой всей теории информации. До этого момента я пытаюсь сделать так, чтобы это значение ощущалось как то, что вас неизбежно привлекает, спрашивая об идеальном сжатии, а не о каком-то произвольном определении, с которого мы начинаем.",
+      "window_s": 17.019999999999982,
+      "target_chars": 230
+    },
+    {
+      "id": "s_46357638ba0cbd518f5a",
+      "source": "Some students do find this negative log takes a little getting used to. You know, it looks like it should be a negative value before you think about the fraction in the middle, but really the intuitive way to read it is that it's asking how many times do you chop your space of possibilities in half to get to a certain quantity.",
+      "draft": "Некоторые студенты находят, что этот негативный журнал требует немного привыкания. Вы знаете, похоже, что это должно быть отрицательным значением, прежде чем вы подумаете о дроби посередине, но на самом деле интуитивно понятный способ чтения заключается в том, что он спрашивает, сколько раз вы разрезаете свое пространство пополам, чтобы добраться до определенного количества.",
+      "window_s": 15.199999999999932,
+      "target_chars": 205
+    },
+    {
+      "id": "s_4099e68d1013170e7a89",
+      "source": "Here, let me pull up some axes and show you the graph of negative log of p. I've also seen some authors default to writing this as the log of 1 over p, which maybe you find more intuitive.",
+      "draft": "Здесь позвольте мне поднять несколько осей и показать вам график отрицательного журнала p. Я также видел, как некоторые авторы по умолчанию пишут это как журнал 1 вместо P, что, возможно, вы считаете более интуитивно понятным.",
+      "window_s": 10.720000000000027,
+      "target_chars": 145
+    },
+    {
+      "id": "s_690d98d089afd7a8ecb4",
+      "source": "You could also think of it as the log base 1 half of p, which I've never really seen anyone lean into, but personally I would be quite partial to that as a convention. Now, however you write it, what Shannon realized is that this is a very useful way to think about the information that a message contains even",
+      "draft": "Вы также могли бы думать об этом как о логарифмической базе 1 половины P, на которую я никогда не видел, чтобы кто-то опирался, но лично я был бы весьма неравнодушен к этому как условности. Теперь, как бы вы это ни писали, Шеннон понял, что это очень полезный способ подумать об информации, содержащейся в сообщении.",
+      "window_s": 15.881999999999948,
+      "target_chars": 214
+    },
+    {
+      "id": "s_f1f4e39736fb8f1b3119",
+      "source": "when literal perfect compression is not possible and p is no longer a clean power of 2, which would mean that the output here is some fractional amount.",
+      "draft": "Когда буквальное идеальное сжатие невозможно, а P больше не является чистой мощностью 2, что означало бы, что выход здесь является некоторой дробной величиной.",
+      "window_s": 8.27800000000002,
+      "target_chars": 112
+    }
+  ],
+  "feedback": [
+    {
+      "id": "s_942a883fddd5d5a97fb3",
+      "required_digits": [
+        {
+          "value": "2",
+          "count": 2
+        }
+      ],
+      "allowed_written_digits": [],
+      "output_digit_options": [
+        [
+          "2"
+        ]
+      ]
+    },
+    {
+      "id": "s_690d98d089afd7a8ecb4",
+      "required_digits": [
+        {
+          "value": "1",
+          "count": 1
+        }
+      ],
+      "allowed_written_digits": [],
+      "output_digit_options": [
+        [
+          "1"
+        ],
+        [
+          "2"
+        ]
+      ]
+    }
+  ],
+  "output": {
+    "items": [
+      {
+        "id": "s_942a883fddd5d5a97fb3",
+        "text_ru": "Возьмём логарифм по основанию 2 от обеих частей и сменим знак. Тогда при идеальном сжатии сообщению нужно −log₂ p бит, где p — вероятность события."
+      },
+      {
+        "id": "s_eb3d0a3347f24d7c0677",
+        "text_ru": "Этот отрицательный логарифм — основа всей теории информации. До сих пор я показывал, как к нему неизбежно прийти через идеальное сжатие, а не начинать с произвольного определения."
+      },
+      {
+        "id": "s_46357638ba0cbd518f5a",
+        "text_ru": "К этому отрицательному логарифму надо привыкнуть. Кажется, значение должно быть отрицательным, пока не учтёшь дробь. Но интуитивно это вопрос: сколько раз нужно делить пространство вариантов пополам, чтобы получить нужное количество?"
+      },
+      {
+        "id": "s_4099e68d1013170e7a89",
+        "text_ru": "Построю оси и покажу график −log p. Некоторые авторы пишут log 1/p — возможно, так понятнее."
+      },
+      {
+        "id": "s_690d98d089afd7a8ecb4",
+        "text_ru": "Можно записать и как логарифм p по основанию 1/2. Так почти никто не пишет, а мне такой вариант нравится. Но как ни записывай, Шеннон понял: это удобный способ описать информацию в сообщении, даже"
+      },
+      {
+        "id": "s_f1f4e39736fb8f1b3119",
+        "text_ru": "Когда идеальное сжатие невозможно и p уже не является точной степенью 2, результат будет дробным."
+      }
+    ]
+  }
+}

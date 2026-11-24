@@ -1,0 +1,23 @@
+[project]
+name = "voxdub-backend"
+version = "1.0.0"
+description = "Local multi-speaker progressive YouTube dubbing service powered by VoxCPM2"
+readme = "../README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "voxcpm",
+    "safetensors",
+    "transformers",
+    "numpy",
+    "scipy",
+    "soundfile",
+    "av",
+    "resemblyzer",
+    "sherpa-onnx",
+    "huggingface_hub",
+    "yt-dlp",
+]
+
+[project.scripts]
+voxdub-server = "dubbing_service:main"

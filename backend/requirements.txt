@@ -1,0 +1,12 @@
+# Core TTS & ML runtime (install PyTorch matching your CUDA version first: https://pytorch.org/get-started/locally/)
+voxcpm
+safetensors
+transformers
+numpy
+scipy
+soundfile
+av
+resemblyzer
+sherpa-onnx
+huggingface_hub
+yt-dlp
