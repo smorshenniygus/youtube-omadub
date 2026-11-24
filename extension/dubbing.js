@@ -311,7 +311,8 @@
       const t = v.currentTime;
       const ad = this.options.isAd();
       const index = this.findSegmentIndex(t);
-      const s = index >= 0 ? this.segments[index] : undefined;
+      const segment = index >= 0 ? this.segments[index] : undefined;
+      const s = segment?.state === 'skipped' ? undefined : segment;
       this.currentSegmentId = s ? s.id : null;
       const timeChanged = !(t === this.lastTickTime);
       this.lastTickTime = t;

@@ -125,7 +125,10 @@ class QualityTests(QueueFixture, unittest.TestCase):
         attempts=[]
         class Long:
             def synthesize(self,s,p):attempts.append(s['text_ru']);wav(p,4);return {'raw_audio_seconds':4}
-        self.quality(engine=Long);j=self.job()
+        self.quality(engine=Long)
+        payload = dict(PAYLOAD, cues=PAYLOAD['cues'][:1])
+        j = self.m.create(payload)['id']
+        self.wait(j, lambda s: s['status'] == 'waiting_translation')
         self.m.translations(j,[{'id':'a','text_ru':'Черновик'}])
         state=self.wait(j,lambda s:s['status']=='failed')
         self.assertEqual(len(attempts),3);self.assertFalse(state['ready_to_play'])
@@ -134,12 +137,35 @@ class QualityTests(QueueFixture, unittest.TestCase):
         self.assertEqual(second_fb['max_raw_seconds'],2.5)
         self.assertEqual(second_fb['previous_attempts'][0]['text_ru'],'Понятный перевод.')
         # Explicit retry after timing error preserves previous_attempts instead of looping blindly.
-        self.m.create(copy.deepcopy(PAYLOAD))
+        self.m.create(payload)
         state=self.wait(j,lambda s:s['status']=='failed' and len(attempts)==6)
         retry_call=self.editor.calls[3][0][0]
         self.assertEqual(retry_call['draft'],'Черновик')
         self.assertTrue(retry_call['feedback']['previous_attempts'])
         self.assertEqual(retry_call['feedback']['previous_attempts'][0]['text_ru'],'Понятный перевод.')
+
+    def test_timing_failure_does_not_block_other_phrases_or_seeking(self):
+        class MixedLength:
+            def synthesize(self, segment, path):
+                wav(path, 4 if segment['id'] == 'a' else .5)
+
+        self.quality(engine=MixedLength)
+        job = self.job()
+        self.m.translations(job, [{'id':'a', 'text_ru':'Черновик'}])
+        partial = self.wait(job, lambda s: s['segments'][0].get('error'))
+        self.assertEqual(partial['status'], 'waiting_translation')
+        self.assertIsNone(partial['error'])
+        self.m.translations(job, [{'id':'b', 'text_ru':'Мир'}])
+        result = self.wait(job, lambda s: s['ready_segments'] == 1 and s['segments'][0].get('error'))
+        self.assertEqual(result['status'], 'complete')
+        self.assertIsNone(result['error'])
+        self.assertEqual(result['skipped_segments'], 1)
+        self.assertEqual(result['segments'][0]['state'], 'skipped')
+        self.assertNotIn('audio_url', result['segments'][0])
+        self.assertEqual(result['ranges'], [[0, 10]])
+        self.assertTrue(self.m.priority(job, 2)['ready_to_play'])
+        self.assertTrue(self.m.priority(job, 6)['ready_to_play'])
+        self.assertTrue(self.m.audio_path(job, 'b').is_file())
 
     def test_short_window_target_chars_not_clamped_up_to_twelve(self):
         self.quality()

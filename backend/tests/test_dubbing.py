@@ -116,7 +116,10 @@ class QueueTests(QueueFixture, unittest.TestCase):
         class LongEngine:
             def synthesize(self,s,p):wav(p,10)
         self.m.close();self.m=self.Manager(self.tmp.name,source_provider=Source(),engine_factory=LongEngine)
-        j=self.job();self.m.translations(j,[{'id':'a','text_ru':'Привет'}])
+        payload = dict(PAYLOAD, cues=PAYLOAD['cues'][:1])
+        j = self.m.create(payload)['id']
+        self.wait(j, lambda s: s['status'] == 'waiting_translation')
+        self.m.translations(j,[{'id':'a','text_ru':'Привет'}])
         s=self.wait(j,lambda s:s['status']=='failed')
         self.assertFalse(s['ready_to_play']);self.assertEqual(s['segments'][0]['state'],'error')
 

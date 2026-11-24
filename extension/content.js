@@ -953,7 +953,7 @@
             "Детали", icon(dubErrorDetailsOpen ? "chev_up" : "chev_down")),
           dubErrorDetailsOpen && h("button", { type: "button", class: dubErrorCopied ? "omy-btn-sage omy-btn-copy" : "omy-btn-ghost omy-btn-copy", onclick: () => copyDubDiagnostic(diagText) },
             icon(dubErrorCopied ? "check" : "copy"), dubErrorCopied ? "Готово" : "Лог")),
-        dubErrorDetailsOpen && h("pre", { class: "omy-diag-box" }, diagText)
+        ...(dubErrorDetailsOpen ? [h("pre", { class: "omy-diag-box" }, diagText)] : [])
       );
       return;
     }
@@ -996,7 +996,7 @@
           h("div", { class: "omy-vram-top" }, h("span", { class: "omy-amber-txt" }, "Свободно VRAM"), h("span", { class: "omy-vram-val" }, avail + " / " + req + " ГиБ нужно")),
           h("div", { class: "omy-vram-track" }, h("i", { style: "width:" + fillPct + "%" })),
           h("div", { class: "omy-vram-note" }, "Модель выгружена · продолжу автоматически. Готово " + formatDubTime(view.readyDoneS) + " (" + view.readyCount + "/" + view.total + ").")),
-        !dub?.playback && autoRow
+        ...(dub?.playback ? [] : [autoRow])
       );
       return;
     }
@@ -1053,6 +1053,8 @@
     metaParts.push(view.langPairStr);
     if (rightMeta) metaParts.push(rightMeta);
     if (view.total > 0) metaParts.push(view.readyCount + "/" + view.total);
+    const skippedCount = dub?.manifest?.skipped_segments || 0;
+    if (skippedCount > 0) metaParts.push("Пропущено: " + skippedCount);
     const metaText = metaParts.join(" · ");
     const rightText = view.eta ? view.eta.label : rightMeta;
     const rightClass = view.eta ? "omy-eta-pill" : "omy-card-meta";
@@ -1107,7 +1109,7 @@
         h("span", { class: "omy-card-right" }, rightEl, collapseBtn, cancelBtn)),
       metaEl,
       prepPipeline,
-      !isPlayingBg && prepAutoRow
+      ...(isPlayingBg ? [] : [prepAutoRow])
     );
   }
   function renderDubMenuCard(view) {

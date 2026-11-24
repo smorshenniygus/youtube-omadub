@@ -13,6 +13,36 @@ function load(overrides={}){const c={AudioContext:AudioContextFixture,globalThis
 test('bridge rejects page URLs and foreign origins',()=>{const {requestSpec}=load();assert.equal(typeof requestSpec,'function');assert.throws(()=>requestSpec({op:'audio',job:'abc',segment:'s',url:'http://evil'}));assert.throws(()=>requestSpec({op:'get',job:'../token'}));assert.throws(()=>requestSpec({op:'create',body:{video_id:'bad'}}));assert.equal(requestSpec({op:'get',job:'a-1'}).path,'/v1/jobs/a-1');});
 test('worker only trusts exact YouTube origin',()=>{const {allowedSender}=load();assert.equal(typeof allowedSender,'function');assert.equal(allowedSender({url:'https://www.youtube.com/watch?v=abcdefghijk'}),true);assert.equal(allowedSender({url:'https://www.youtube.com.evil/watch'}),false);assert.equal(allowedSender({url:'https://x.com/'}),false);});
 class Media extends EventTarget {constructor(){super();this.currentTime=0;this.paused=false;this.volume=1;this.playbackRate=1;this.seeking=false;this.readyState=4;this.muted=false;this.plays=0;}pause(){this.paused=true;this.dispatchEvent(new Event('pause'));}play(){this.plays++;this.paused=false;this.dispatchEvent(new Event('play'));return Promise.resolve();}}
+test('seeking across a skipped phrase leaves video running and plays the next ready clip', async () => {
+ const {Playback}=load();
+ const video=new Media();
+ const clip=new Media();
+ const loaded=[];
+ const playback=new Playback(video,{
+  load:async segment=>{loaded.push(segment.id);return 'fixture';},
+  makeAudio:()=>clip,isAd:()=>false,
+ });
+ playback.setSegments([
+  {id:'skipped',start:0,end:4,state:'skipped'},
+  {id:'ready',start:4,end:8,audio_duration:4,state:'ready'},
+ ]);
+ try {
+  await playback.start();
+  await new Promise(setImmediate);
+  assert.equal(video.paused,false);
+  assert.deepEqual(loaded,['ready']);
+  video.currentTime=5;
+  video.dispatchEvent(new Event('seeked'));
+  assert.equal(clip.paused,false);
+  assert.equal(clip.currentTime,1);
+  video.currentTime=2;
+  video.dispatchEvent(new Event('seeked'));
+  assert.equal(video.paused,false);
+  assert.equal(clip.paused,true);
+ } finally {
+  playback.stop();
+ }
+});
 test('phrase continuation follows published speech start, not original subtitle boundary',async()=>{
  const {Playback}=load();const v=new Media();const clips={a:new Media(),b:new Media()};
  const p=new Playback(v,{load:async s=>s.id,makeAudio:id=>clips[id],isAd:()=>false});

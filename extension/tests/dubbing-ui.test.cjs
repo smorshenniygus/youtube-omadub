@@ -64,7 +64,7 @@ test('v2 menu tabs, original presets, and hide-subs toggle work and preserve sta
 });
 test('v2 rich status card renders 4 stages, VRAM gauge, ready CTA, micro-strip, and error actions',()=>{
   const {c}=fixture();
-  const addReplace = el => { if (!el) return; el.replaceChildren = (...kids) => { el.children = kids.flat().filter(x=>x!=null&&x!==false); }; };
+  const addReplace = el => { if (!el) return; el.replaceChildren = (...kids) => { el.children = kids.map(x => typeof x === 'object' && x !== null ? x : String(x)); }; };
   addReplace(c.ui.dubButton); addReplace(c.ui.dubError); addReplace(c.ui.dubMenuCard);
   const text = node => typeof node === 'string' ? node : (node?.children || []).map(text).join(' ');
   // 1. Preparing stage 4
@@ -102,6 +102,7 @@ test('v2 rich status card renders 4 stages, VRAM gauge, ready CTA, micro-strip, 
   assert.equal(c.ui.dubQuickStop.hidden, false);
   c.ui.dubError.children[0].onclick();
   assert.equal(c.ui.dubError['data-card'], 'playing');
+  assert.doesNotMatch(text(c.ui.dubError), /\bfalse\b/);
   // 5. Error card shows stage title + Повторить + Токен
   c.fail();
   assert.equal(c.ui.pill['data-dub'], 'error');
