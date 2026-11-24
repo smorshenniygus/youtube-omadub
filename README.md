@@ -44,8 +44,8 @@ Most browser dubbing tools send your videos to paid cloud servers and replace ev
 
 | GPU Class | Architecture | Default Dtype | CUDA Graphs | Super-Batch (`B`) | Notes |
 |---|---|---|---|---|---|
-| **16 GB+ modern** (RTX 5070 Ti / 5080 / 4080 / 4070 Ti S / 3090 / 4090 / 5090) | Ampere / Ada / Hopper / Blackwell (`SM >= 8.0`) | `BF16` (+ FP32 VAE) | **Auto ON** | **`B=8`** (4 segs × 2 takes) | Fastest (~4.5–5.3× realtime) |
-| **12 GB modern** (RTX 4070 / 4070 S / 5070 / 3060 12G) | `SM >= 8.0` | `BF16` (+ FP32 VAE) | **Auto ON** | **`B=4–6`** | Smooth streaming |
+| **12 GB+ modern** (RTX 3060 12G / 4070 / 4070 S / 5070 / 4080 / 5080 / 3090 / 4090 / 5090) | Ampere / Ada / Hopper / Blackwell (`SM >= 8.0`) | `BF16` (+ FP32 VAE) | **Auto ON** | **`B=8`** (4 segs × 2 takes) | Fastest (~4.5–5.3× realtime, ~7.2 GiB peak) |
+| **10 GB modern** (RTX 3080 10G) | `SM >= 8.0` | `BF16` (+ FP32 VAE) | **Auto ON** | **`B=6`** | Smooth streaming |
 | **8 GB modern** (RTX 3070 / 4060 / 4060 Ti 8G) | `SM >= 8.0` | `BF16` (+ FP32 VAE) | Off (safe) | **`B=2`** | Tight VRAM safe mode |
 | **Older CUDA** (RTX 20-series) | Turing (`SM 7.5`) | `FP16` (+ FP32 VAE) | Off | **`B=2`** | Weight fusion + fast KV active |
 

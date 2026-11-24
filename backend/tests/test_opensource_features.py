@@ -83,10 +83,22 @@ class OpenSourceFeaturesTests(unittest.TestCase):
         self.assertEqual(p['max_batch_size'], 8)
         self.assertTrue(p['weight_fusion'])
 
-        # Ada 12 GB (e.g. RTX 4070)
+        # Ampere 12 GB (e.g. RTX 3060 12GB reporting 11922 MiB) -> full B=8 + CUDA Graphs
+        p = resolve_gpu_profile('NVIDIA GeForce RTX 3060', (8, 6), 11922, env={})
+        self.assertEqual(p['arch_family'], 'ampere')
+        self.assertEqual(p['dtype'], 'bfloat16')
+        self.assertTrue(p['cuda_graphs'])
+        self.assertEqual(p['max_batch_size'], 8)
+
+        # Ada 12 GB (e.g. RTX 4070) -> full B=8 + CUDA Graphs
         p = resolve_gpu_profile('NVIDIA GeForce RTX 4070', (8, 9), 12288, env={})
         self.assertEqual(p['arch_family'], 'ada')
         self.assertEqual(p['dtype'], 'bfloat16')
+        self.assertTrue(p['cuda_graphs'])
+        self.assertEqual(p['max_batch_size'], 8)
+
+        # Ampere 10 GB (e.g. RTX 3080 10GB) -> B=6 + CUDA Graphs
+        p = resolve_gpu_profile('NVIDIA GeForce RTX 3080', (8, 6), 10240, env={})
         self.assertTrue(p['cuda_graphs'])
         self.assertEqual(p['max_batch_size'], 6)
 

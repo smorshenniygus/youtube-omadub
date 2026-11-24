@@ -1,19 +1,20 @@
 # Python / virtual environments
-.venv*/
-venv/
+.venv*
+venv
 __pycache__/
 *.pyc
 *.pyo
-.cache/
+.cache
 
-# Local runtime state, secrets, downloaded models
-backend/data/
-backend/models/
+# Local runtime state, secrets, downloaded models (matches dirs and symlinks)
+backend/data
+backend/models
+backend/model-revision.txt
 extension/local-config.json
 *.env
 .env
 
 # OS / editor / local design scratch
-design/
+design
 .DS_Store
 Thumbs.db

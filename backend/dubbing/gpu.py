@@ -214,18 +214,18 @@ def resolve_gpu_profile(name, compute_capability, total_vram_mib, env=None):
     elif graphs_env in ('0', 'false', 'no', 'off'):
         cuda_graphs = False
     else:
-        cuda_graphs = major >= 8 and total_vram_mib >= 10000
+        cuda_graphs = major >= 8 and total_vram_mib >= 9500
 
     batch_env = str(env.get('VOXDUB_MAX_BATCH', 'auto')).strip().lower()
     if batch_env.isdigit() and int(batch_env) in (1, 2, 4, 6, 8):
         max_batch_size = int(batch_env)
     else:
-        if total_vram_mib >= 14500:
+        # Measured B=8 + CUDA Graphs peak is ~7.2 GiB (leaving ~4.5 GiB headroom on 12 GiB cards).
+        # Engine still caps chosen_batch dynamically by actual post-load free VRAM.
+        if total_vram_mib >= 11000:
             max_batch_size = 8
-        elif total_vram_mib >= 12000:
+        elif total_vram_mib >= 9500:
             max_batch_size = 6
-        elif total_vram_mib >= 10000:
-            max_batch_size = 4
         else:
             max_batch_size = 2
 
