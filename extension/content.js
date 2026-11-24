@@ -515,6 +515,7 @@
     speaker_analysis: "Разбираю голоса",
     source_ready: "Голоса подготовлены",
   };
+  const dubMegabytes = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 });
   let dubStatusText = "Подготовка с начала видео · Vox", dubErrorText = "", dubErrorStageLabel = "", dubErrorStageKey = "";
   let dubBuffering = false, dubCardCollapsed = false, dubAutoCollapsedPlayback = null, dubMenuTab = "subs";
   let dubAutoStart = false, dubAutoCountdown = 0, dubAutoTimer = 0, dubAutoCancelled = false;
@@ -741,6 +742,19 @@
       : Math.min(duration || Infinity, Math.max(timelineCoveredS, segsReadyS));
     const bgSynthesis = Boolean(dub?.playback || dub?.ready || (reqBuf > 0 && bufferedS >= reqBuf));
     const progress = manifest?.source_progress || {};
+    const downloading = status === "preparing" && progress.phase === "source_download";
+    const downloaded = Number.isFinite(progress.downloaded_bytes) && progress.downloaded_bytes >= 0 ? progress.downloaded_bytes : null;
+    const downloadTotal = Number.isFinite(progress.total_bytes) && progress.total_bytes > 0 ? progress.total_bytes : null;
+    const downloadPct = downloading && downloaded != null && downloadTotal != null
+      ? Math.min(100, Math.floor(100 * downloaded / downloadTotal))
+      : null;
+    let downloadLabel = "";
+    if (downloading && downloaded != null) {
+      const size = dubMegabytes.format(downloaded / 1e6);
+      downloadLabel = downloadTotal == null
+        ? "Скачано " + size + " МБ"
+        : size + " из " + (progress.total_estimated ? "≈" : "") + dubMegabytes.format(downloadTotal / 1e6) + " МБ";
+    }
     const gpuWait = status === "waiting_gpu" ? manifest?.gpu_wait : null;
     const uncertainVoices = manifest?.source_metadata?.caption_boundary_fallbacks?.length || 0;
     const noCaps = !dub && !dubErrorText && typeof capCount !== "undefined" && capCount === 0 && (typeof track === "undefined" || track?.v !== (typeof curV !== "undefined" ? curV : null));
@@ -750,8 +764,9 @@
     // 4 real backend stages: 1 Голоса -> 2 Перевод -> 3 Текст -> 4 Синтез
     const s1Pct = status === "preparing"
       ? (progress.phase === "speaker_analysis" && (progress.duration || duration) > 0
-          ? Math.max(8, Math.min(99, Math.round(100 * (progress.analyzed_until || 0) / (progress.duration || duration))))
-          : progress.phase === "source_downloaded" ? 25 : 12)
+          ? Math.min(99, 25 + Math.round(75 * (progress.analyzed_until || 0) / (progress.duration || duration)))
+          : downloading ? Math.round((downloadPct || 0) / 4)
+          : ["source_io", "source_downloaded"].includes(progress.phase) ? 25 : 0)
       : (dub ? 100 : 0);
     const translated = total ? segs.filter(s => s.state !== "needs_translation").length : 0;
     const edited = total ? segs.filter(s => s.state === "pending" || s.state === "generating" || s.state === "ready").length : 0;
@@ -769,7 +784,8 @@
     ];
     const startPct = reqBuf > 0 ? Math.min(99, Math.round(100 * bufferedS / reqBuf)) : s4Pct;
     const pillPct = stageIdx === 1 ? s1Pct : stageIdx === 2 ? s2Pct : stageIdx === 3 ? s3Pct : startPct;
-    const stageShort = stageIdx === 1 ? "Голоса 1/4" : stageIdx === 2 ? "Перевод 2/4" : stageIdx === 3 ? "Текст 3/4" : "Синтез 4/4";
+    const stageShort = downloading ? "Загрузка" :
+      stageIdx === 1 ? "Голоса 1/4" : stageIdx === 2 ? "Перевод 2/4" : stageIdx === 3 ? "Текст 3/4" : "Синтез 4/4";
     const speakersCount = new Set(segs.map(s => s?.speaker || s?.speaker_id).filter(Boolean)).size;
     const eta = bgSynthesis
       ? updateDubEta(readyDoneS, stageIdx, gpuWait, duration, -1)
@@ -777,7 +793,7 @@
     const srcLang = manifest?.source_language || dub?.launch?.context?.source_language || (typeof track !== "undefined" && track?.lang) || "en";
     const langPairStr = String(srcLang).split("-")[0].toUpperCase() + " → RU";
     const resumeAt = dubResumeSeconds();
-    return { mode, status, total, readyCount, duration, reqBuf, readyUntil, bufferedS, readyDoneS, bgSynthesis, prioritySec, progress, gpuWait, uncertainVoices, stages, stageIdx, pillPct, stageShort, s4Pct, speakersCount, eta, langPairStr, resumeAt };
+    return { mode, status, total, readyCount, duration, reqBuf, readyUntil, bufferedS, readyDoneS, bgSynthesis, prioritySec, progress, gpuWait, uncertainVoices, stages, stageIdx, pillPct, stageShort, s4Pct, speakersCount, eta, langPairStr, resumeAt, downloading, downloadLabel, downloadPct };
   }
   function liveEqEl() {
     const paused = Boolean(typeof video !== "undefined" && video?.paused);
@@ -798,7 +814,9 @@
       const paused = Boolean(typeof video !== "undefined" && video?.paused);
       const avail = Number.isFinite(view.gpuWait?.available_mib) ? (view.gpuWait.available_mib / 1024).toFixed(1) : "?";
       const req = Number.isFinite(view.gpuWait?.required_mib) ? (view.gpuWait.required_mib / 1024).toFixed(1) : "?";
-      const pctLabel = view.pillPct > 0 ? view.pillPct + "%" : view.stageIdx + "/4";
+      const pctLabel = view.downloading
+        ? (view.downloadPct == null ? "" : (view.progress.total_estimated ? "≈" : "") + view.downloadPct + "%")
+        : view.pillPct > 0 ? view.pillPct + "%" : view.stageIdx + "/4";
       const atTime = typeof video !== "undefined" && Number.isFinite(video?.currentTime) ? " " + formatDubTime(video.currentTime) : "";
       const pillSig = [view.mode, view.stageShort, pctLabel, avail, req, dub?.starting, hasResume, resumeStr, paused, atTime].join("|");
       if (btn._omyPillSig !== pillSig) {
@@ -904,7 +922,8 @@
       const microTxt = dubBuffering
         ? "Жду фрагмент " + formatDubTime(typeof video !== "undefined" ? video?.currentTime : view.readyDoneS) + " · видео на паузе"
         : (dub?.playback ? "Синтез в фоне" : view.stageShort);
-      const microVal = view.stageIdx === 4 && !view.bgSynthesis && view.reqBuf > 0
+      const microVal = view.downloading ? view.downloadLabel :
+        view.stageIdx === 4 && !view.bgSynthesis && view.reqBuf > 0
         ? formatDubTime(view.bufferedS) + " / " + formatDubTime(view.reqBuf)
         : view.duration > 0
           ? formatDubTime(view.readyDoneS) + " / " + formatDubTime(view.duration)
@@ -1041,7 +1060,8 @@
       view.status === "waiting_translation" ? "Перевожу фрагменты" :
       view.status === "editing" ? "Адаптирую русский текст" :
       isPlayingBg ? "Синтез в фоне" : "Создаю русскую речь";
-    const rightMeta = view.stageIdx === 1 && (view.progress.duration || view.duration) > 0
+    const rightMeta = view.downloading ? view.downloadLabel :
+      view.progress.phase === "speaker_analysis" && view.stageIdx === 1 && (view.progress.duration || view.duration) > 0
       ? formatDubTime(view.progress.analyzed_until || 0) + " / " + formatDubTime(view.progress.duration || view.duration)
       : view.stageIdx === 4
         ? (view.bgSynthesis && view.duration > 0
@@ -1051,7 +1071,7 @@
     const metaParts = [];
     if (view.speakersCount > 0) metaParts.push(pluralVoices(view.speakersCount));
     metaParts.push(view.langPairStr);
-    if (rightMeta) metaParts.push(rightMeta);
+    if (rightMeta && !view.downloading) metaParts.push(rightMeta);
     if (view.total > 0) metaParts.push(view.readyCount + "/" + view.total);
     const skippedCount = dub?.manifest?.skipped_segments || 0;
     if (skippedCount > 0) metaParts.push("Пропущено: " + skippedCount);
@@ -1122,7 +1142,8 @@
       view.mode === "ready" ? (hasResume ? "Готово · продолжить с " + resumeStr : "Готово к запуску с 0:00") :
       view.mode === "gpu" ? "Жду свободную VRAM" :
       view.mode === "prep" ? view.stageShort : "Озвучка не запущена";
-    const counter = view.total ? view.readyCount + " / " + view.total : (view.mode === "idle" ? "готово 0" : "");
+    const counter = view.downloading ? view.downloadLabel :
+      view.total ? view.readyCount + " / " + view.total : (view.mode === "idle" ? "готово 0" : "");
     const barPct = view.mode === "idle" ? 0 : view.stageIdx === 4 ? view.s4Pct : view.pillPct;
     const paused = Boolean(typeof video !== "undefined" && video?.paused);
     const menuSig = [view.mode, title, counter, barPct, hasResume, resumeStr, paused, Boolean(dubErrorText)].join("|");

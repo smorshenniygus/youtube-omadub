@@ -67,6 +67,16 @@ test('v2 rich status card renders 4 stages, VRAM gauge, ready CTA, micro-strip, 
   const addReplace = el => { if (!el) return; el.replaceChildren = (...kids) => { el.children = kids.map(x => typeof x === 'object' && x !== null ? x : String(x)); }; };
   addReplace(c.ui.dubButton); addReplace(c.ui.dubError); addReplace(c.ui.dubMenuCard);
   const text = node => typeof node === 'string' ? node : (node?.children || []).map(text).join(' ');
+  c.dub = { manifest: { status: 'preparing', duration: 840, source_progress: {
+    phase: 'source_download', downloaded_bytes: 22500000, total_bytes: 37500000,
+  } } };
+  c.dubStatus('Скачиваю исходный звук');
+  assert.match(text(c.ui.dubError), /22,5 из 37,5 МБ/);
+  assert.match(text(c.ui.dubButton), /60%/);
+  delete c.dub.manifest.source_progress.total_bytes;
+  c.dubStatus('Скачиваю исходный звук');
+  assert.match(text(c.ui.dubError), /Скачано 22,5 МБ/);
+  assert.doesNotMatch(text(c.ui.dubButton), /%/);
   // 1. Preparing stage 4
   c.dub = { ready: false, playback: null, manifest: { status: 'generating', duration: 840, required_buffer_s: 300, ready_until: 225, ready_segments: 18, total_segments: 48, segments: [] }, session: { cancel: async () => {} } };
   c.dubStatus('Создаю русскую речь');

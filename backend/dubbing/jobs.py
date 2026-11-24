@@ -622,7 +622,10 @@ class JobManager:
                 last_progress_save = [0.0, None]
                 def progress(value):
                     if self.stop.is_set() or j['cancelled']:raise PreparationCancelled()
-                    filtered={k:v for k,v in value.items() if k in ('phase','seconds','analyzed_until','duration','total_segments')}
+                    filtered = {k: v for k, v in value.items() if k in (
+                        'phase', 'seconds', 'analyzed_until', 'duration', 'total_segments',
+                        'downloaded_bytes', 'total_bytes', 'total_estimated',
+                    )}
                     now=time.monotonic()
                     phase=filtered.get('phase')
                     should_save=(phase!=last_progress_save[1]) or (now-last_progress_save[0]>=2.0)
