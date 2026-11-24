@@ -353,7 +353,8 @@ class SourceProvider:
             # Clean up any stray partial/previous container files before downloading.
             for stray in directory.glob("original.*"):
                 stray.unlink(missing_ok=True)
-            self._run(["yt-dlp", "--no-playlist", "--progress", "--newline", "--progress-delta", "0.5",
+            network_options = ["--force-ipv4"] if os.environ.get("VOXDUB_YTDLP_FORCE_IPV4") == "1" else []
+            self._run(["yt-dlp", *network_options, "--no-playlist", "--progress", "--newline", "--progress-delta", "0.5",
                        "--progress-template", "download:VOXDUB_DOWNLOAD %(progress.downloaded_bytes)d "
                        "%(progress.total_bytes)d %(progress.total_bytes_estimate)d", "--concurrent-fragments", "4",
                        "--socket-timeout", "30",
