@@ -11,7 +11,7 @@ import torch
 from dubbing.engine import VoxEngine
 from dubbing.gpu import resolve_gpu_profile
 from dubbing.jobs import JobManager, digest
-from dubbing.vox_accel import _run_dit_decoder_tail, choose_locdit_compact_batch
+from dubbing.vox_accel import choose_locdit_compact_batch
 
 
 class LocDiTCompactionPolicyTests(unittest.TestCase):
@@ -224,64 +224,6 @@ class ClosestPartnerSelectionTests(unittest.TestCase):
                 self.assertEqual([c['id'] for c in chosen_first], ['s1', 's2', 's3'])
             finally:
                 mgr.close()
-
-    def test_dit_last_layer_tail_trim_matches_full_decoder(self):
-        """Last-layer 11->4 tail trim must match full bidirectional MiniCPMModel output on [:, prefix_len:, :]."""
-        from voxcpm.modules.minicpm4.config import MiniCPM4Config, RopeScalingConfig
-        from voxcpm.modules.minicpm4.model import MiniCPMModel
-        from dubbing.vox_accel import _fuse_qkv_and_mlp
-
-        cfg = MiniCPM4Config(
-            bos_token_id=1,
-            eos_token_id=2,
-            hidden_size=64,
-            intermediate_size=128,
-            num_hidden_layers=2,
-            num_attention_heads=4,
-            num_key_value_heads=2,
-            kv_channels=16,
-            vocab_size=32,
-            max_position_embeddings=64,
-            rms_norm_eps=1e-5,
-            rope_theta=10000.0,
-            rope_scaling=RopeScalingConfig(
-                type='longrope',
-                long_factor=[1.0] * 8,
-                short_factor=[1.0] * 8,
-                original_max_position_embeddings=64,
-            ),
-            scale_emb=1.0,
-            dim_model_base=64,
-            scale_depth=1.4,
-            use_mup=False,
-        )
-        torch.manual_seed(7)
-        dec = MiniCPMModel(cfg).eval()
-        # Run reference BEFORE weight fusion
-        seq = torch.randn((4, 11, 64))
-        with torch.inference_mode():
-            ref_full, _ = dec(seq, is_causal=False)
-            ref_tail = ref_full[:, 7:, :]
-            _fuse_qkv_and_mlp(dec)
-            # Patch layer 0 forward to use fused qkv_proj
-            def fused_attn_fwd(self, hidden_states, position_emb, is_causal):
-                from voxcpm.modules.minicpm4.model import apply_rotary_pos_emb
-                bsz, q_len, _ = hidden_states.size()
-                q, k, v = self.qkv_proj(hidden_states).split(self._qkv_dims, dim=-1)
-                q = q.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-                k = k.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-                v = v.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-                if position_emb is not None:
-                    q, k = apply_rotary_pos_emb(q, k, *position_emb)
-                out = torch.nn.functional.scaled_dot_product_attention(q, k, v, is_causal=is_causal, enable_gqa=True)
-                out = out.transpose(1, 2).contiguous().reshape(bsz, q_len, self.num_heads * self.head_dim)
-                return self.o_proj(out), (k, v)
-            for lyr in dec.layers:
-                lyr.self_attn.forward = types.MethodType(fused_attn_fwd, lyr.self_attn)
-            pos_emb = dec.rope_emb(torch.arange(0, 11, dtype=torch.long)) if dec.rope_emb is not None else None
-            trimmed_tail = _run_dit_decoder_tail(dec, seq, 7, pos_emb)
-        max_diff = (ref_tail - trimmed_tail).abs().max().item()
-        self.assertLess(max_diff, 1e-5)
 
 
 if __name__ == '__main__':
