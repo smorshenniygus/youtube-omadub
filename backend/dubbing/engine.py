@@ -21,6 +21,7 @@ from .vox_accel import (
     _prefill_lm_suffix,
     _run_enc_step_graphed,
     _run_lm_step_fast,
+    choose_locdit_compact_batch,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -53,6 +54,8 @@ class VoxEngine:
         self._last_candidate = None
         self._last_decode_frames = DECODE_FRAMES
         self._supports_batched = False
+        self._locdit_tail_compaction = False
+        self.last_alive_hist = {}
         if model is not None:
             self.model = model
             self._reranker = reranker
@@ -103,6 +106,9 @@ class VoxEngine:
             enable_cuda_graphs=bool(self.gpu_profile.get('cuda_graphs', True)),
         )
         self.max_batch_size = chosen_batch if self._supports_batched else 1
+        self._locdit_tail_compaction = bool(
+            self._supports_batched and self.gpu_profile.get('locdit_tail_compaction', False)
+        )
         self._reranker = reranker if reranker is not None else LeanCascadeReranker.from_default_dir()
 
     def _ref_key(self, segment):
@@ -555,21 +561,51 @@ class VoxEngine:
             stop_steps = list(slot_max_lens)
             in_ch = tts.feat_decoder.in_channels
             patch_sz = tts.patch_size
+            alive_hist = {}
+            use_compact = bool(getattr(self, '_locdit_tail_compaction', False))
 
             for i in range(max_steps):
-                dit_hidden = torch.cat((tts.lm_to_dit_proj(lm_hidden), tts.res_to_dit_proj(residual_hidden)), dim=-1)
+                # Keep RNG draw order identical across all slots for deterministic A/B parity.
                 z = torch.cat(
                     [torch.randn((1, in_ch, patch_sz), generator=g, device=dev, dtype=dtype) for g in gens],
                     dim=0,
                 )
-                pred_feat = tts.feat_decoder.solve_euler(
-                    x=z,
-                    t_span=t_span,
-                    mu=dit_hidden,
-                    cond=prefix_feat_cond.transpose(1, 2).contiguous(),
-                    cfg_value=cfg,
-                    use_cfg_zero_star=True,
-                ).transpose(1, 2)
+                alive_indices = [k for k in range(total_bsz) if not finished[k]]
+                n_alive = len(alive_indices)
+                alive_hist[n_alive] = alive_hist.get(n_alive, 0) + 1
+
+                compact_b = total_bsz
+                if use_compact and 0 < n_alive < total_bsz:
+                    has_b4 = any(key[0] == 4 for key in getattr(tts.feat_decoder, '_cuda_graphs', ()))
+                    compact_b = choose_locdit_compact_batch(n_alive, total_bsz, has_b4_graph=has_b4)
+
+                if compact_b < total_bsz:
+                    pad_indices = alive_indices + [alive_indices[-1]] * (compact_b - n_alive)
+                    idx_pad = torch.tensor(pad_indices, device=dev, dtype=torch.long)
+                    idx_live = idx_pad[:n_alive]
+                    lm_sub = lm_hidden.index_select(0, idx_pad)
+                    res_sub = residual_hidden.index_select(0, idx_pad)
+                    dit_sub = torch.cat((tts.lm_to_dit_proj(lm_sub), tts.res_to_dit_proj(res_sub)), dim=-1)
+                    sub_pred = tts.feat_decoder.solve_euler(
+                        x=z.index_select(0, idx_pad),
+                        t_span=t_span,
+                        mu=dit_sub,
+                        cond=prefix_feat_cond.index_select(0, idx_pad).transpose(1, 2).contiguous(),
+                        cfg_value=cfg,
+                        use_cfg_zero_star=True,
+                    ).transpose(1, 2)
+                    pred_feat = prefix_feat_cond.clone()
+                    pred_feat.index_copy_(0, idx_live, sub_pred[:n_alive])
+                else:
+                    dit_hidden = torch.cat((tts.lm_to_dit_proj(lm_hidden), tts.res_to_dit_proj(residual_hidden)), dim=-1)
+                    pred_feat = tts.feat_decoder.solve_euler(
+                        x=z,
+                        t_span=t_span,
+                        mu=dit_hidden,
+                        cond=prefix_feat_cond.transpose(1, 2).contiguous(),
+                        cfg_value=cfg,
+                        use_cfg_zero_star=True,
+                    ).transpose(1, 2)
 
                 curr_embed = _run_enc_step_graphed(tts, pred_feat)
                 pred_patches.append(pred_feat.unsqueeze(1))
@@ -589,6 +625,8 @@ class VoxEngine:
                 pos = tts.base_lm.kv_cache.step()
                 tts.residual_lm.kv_cache.step()
                 lm_hidden, residual_hidden = _run_lm_step_fast(tts, curr_embed[:, 0, :], pos, slot_groups=slot_groups)
+
+            self.last_alive_hist = alive_hist
 
             per_item_results = []
             slot_idx = 0

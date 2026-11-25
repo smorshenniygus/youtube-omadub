@@ -196,6 +196,7 @@ def resolve_gpu_profile(name, compute_capability, total_vram_mib, env=None):
             'cuda_graphs': False,
             'max_batch_size': 1,
             'weight_fusion': False,
+            'locdit_tail_compaction': False,
         }
 
     major, minor = int(compute_capability[0]), int(compute_capability[1])
@@ -229,6 +230,18 @@ def resolve_gpu_profile(name, compute_capability, total_vram_mib, env=None):
         else:
             max_batch_size = 2
 
+    compact_env = str(env.get('VOXDUB_LOCDIT_COMPACT', 'auto')).strip().lower()
+    if compact_env in ('1', 'true', 'yes', 'on'):
+        locdit_tail_compaction = True
+    elif compact_env in ('0', 'false', 'no', 'off'):
+        locdit_tail_compaction = False
+    else:
+        # Verified GA106 / RTX 3060 M=22*B tile staircase (B=6->5 saves ~19 ms, B=3->2 saves ~12 ms).
+        # Keep disabled by default on unverified GPUs until profiled; opt-in via VOXDUB_LOCDIT_COMPACT=1.
+        locdit_tail_compaction = bool(
+            cuda_graphs and major == 8 and minor == 6 and '3060' in str(name or '')
+        )
+
     return {
         'available': True,
         'name': str(name or 'CUDA GPU'),
@@ -239,6 +252,7 @@ def resolve_gpu_profile(name, compute_capability, total_vram_mib, env=None):
         'cuda_graphs': cuda_graphs,
         'max_batch_size': max_batch_size,
         'weight_fusion': True,
+        'locdit_tail_compaction': locdit_tail_compaction,
     }
 
 

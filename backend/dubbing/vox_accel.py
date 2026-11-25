@@ -3,6 +3,29 @@ import math
 import types
 
 
+def choose_locdit_compact_batch(n_alive, total_bsz, has_b4_graph=False):
+    """Map live slot count to a compact LocDiT CUDA Graph width on GA106 (M=22*B tile boundaries).
+
+    Policy calibrated on RTX 3060:
+      - 6..8 alive: keep original batch width (no gather/scatter)
+      - 3..5 alive: keep B=4 if total_bsz==4; reuse warm B=4 graph for 3..4 alive; otherwise B=5
+      - 1..2 alive: keep total_bsz if <=2; otherwise B=2
+    Returns total_bsz when compaction should be skipped.
+    """
+    if n_alive <= 0 or n_alive >= total_bsz or total_bsz <= 2:
+        return total_bsz
+    if n_alive <= 2:
+        return 2
+    if n_alive <= 5:
+        if total_bsz == 4:
+            return 4
+        if n_alive <= 4 and has_b4_graph:
+            return 4
+        if total_bsz > 5:
+            return 5
+    return total_bsz
+
+
 def _fuse_qkv_and_mlp(tts_model):
     """Mathematically exact weight fusion: q/k/v -> qkv_proj and gate/up -> gate_up_proj (0 extra VRAM)."""
     import torch
@@ -38,6 +61,43 @@ def _apply_residual_and_mlp(layer, residual, attn_out):
     hidden_states = residual + (attn_out * scale if scale is not None else attn_out)
     mlp_out = layer.mlp(layer.post_attention_layernorm(hidden_states))
     return hidden_states + (mlp_out * scale if scale is not None else mlp_out)
+
+
+def _run_dit_decoder_tail(decoder, seq, prefix_len, position_emb):
+    """Run LocDiT bidirectional decoder and compute the last layer's output projections only for [prefix_len:] tokens.
+
+    Mathematically identical to decoder(seq, is_causal=False)[0][:, prefix_len:, :] because no subsequent
+    attention layer reads tokens [:prefix_len], while cutting last-layer SDPA queries, o_proj, RMSNorm,
+    MLP (gate_up + down), and final norm from 11 tokens to 4 tokens (M=176 -> M=64 at B=8).
+    """
+    import torch.nn.functional as F
+    from voxcpm.modules.minicpm4.model import apply_rotary_pos_emb
+
+    hidden = seq
+    for layer in decoder.layers[:-1]:
+        hidden, _ = layer(hidden, position_emb, False)
+
+    last = decoder.layers[-1]
+    residual_tail = hidden[:, prefix_len:, :]
+    h = last.input_layernorm(hidden)
+    attn = last.self_attn
+    bsz, q_len, _ = h.size()
+    q_dim, k_dim, v_dim = attn._qkv_dims
+    q, k, v = attn.qkv_proj(h).split((q_dim, k_dim, v_dim), dim=-1)
+    q = q.view(bsz, q_len, attn.num_heads, attn.head_dim).transpose(1, 2)
+    k = k.view(bsz, q_len, attn.num_key_value_heads, attn.head_dim).transpose(1, 2)
+    v = v.view(bsz, q_len, attn.num_key_value_heads, attn.head_dim).transpose(1, 2)
+    if position_emb is not None:
+        cos, sin = position_emb
+        q, k = apply_rotary_pos_emb(q, k, cos, sin)
+    tail_len = q_len - prefix_len
+    attn_out = F.scaled_dot_product_attention(
+        q[:, :, prefix_len:, :], k, v, is_causal=False, enable_gqa=True,
+    )
+    attn_out = attn_out.transpose(1, 2).contiguous().reshape(bsz, tail_len, attn.num_heads * attn.head_dim)
+    attn_out = attn.o_proj(attn_out)
+    hidden_tail = _apply_residual_and_mlp(last, residual_tail, attn_out)
+    return decoder.norm(hidden_tail)
 
 
 def _install_fast_kv_attention(tts_model, max_length=2048, max_batch_size=8, enable_cuda_graphs=True):
@@ -214,11 +274,22 @@ def _install_fast_kv_attention(tts_model, max_length=2048, max_batch_size=8, ena
 
             if has_fast_est:
                 est_m = self.estimator
+                dec = est_m.decoder
                 cond_p1 = est_m.cond_proj(cond.transpose(1, 2).contiguous())
                 cond_p_in = torch.cat((cond_p1, cond_p1), dim=0)
                 mu_view = mu_in.view(2 * b, -1, cond_p1.size(-1))
                 prefix_len = cond_p1.size(1) + mu_view.size(1) + 1
                 t_emb_all = est_m.time_mlp(est_m.time_embeddings(t_span[:-1]).to(x.dtype)) + est_m._cached_zero_dt_emb
+                can_trim_last = (
+                    hasattr(dec, 'layers')
+                    and len(dec.layers) >= 1
+                    and hasattr(dec, 'norm')
+                    and hasattr(dec.layers[-1].self_attn, '_qkv_dims')
+                )
+                pos_emb = None
+                if can_trim_last and getattr(dec, 'rope_emb', None) is not None:
+                    pos_ids = torch.arange(0, prefix_len + x.size(2), dtype=torch.long, device=x.device)
+                    pos_emb = dec.rope_emb(pos_ids)
             else:
                 cond_in = torch.cat((cond, cond), dim=0)
                 dt_in = torch.zeros(2 * b, device=x.device, dtype=x.dtype)
@@ -232,8 +303,12 @@ def _install_fast_kv_attention(tts_model, max_length=2048, max_batch_size=8, ena
                         x_p_in = torch.cat((x_p1, x_p1), dim=0)
                         t_step = t_emb_all[step - 1:step].expand(2 * b, -1).unsqueeze(1)
                         seq = torch.cat((mu_view, t_step, cond_p_in, x_p_in), dim=1)
-                        hidden, _ = est_m.decoder(seq, is_causal=False)
-                        out = est_m.out_proj(hidden[:, prefix_len:, :]).transpose(1, 2).contiguous()
+                        if can_trim_last:
+                            hidden_tail = _run_dit_decoder_tail(dec, seq, prefix_len, pos_emb)
+                            out = est_m.out_proj(hidden_tail).transpose(1, 2).contiguous()
+                        else:
+                            hidden, _ = dec(seq, is_causal=False)
+                            out = est_m.out_proj(hidden[:, prefix_len:, :]).transpose(1, 2).contiguous()
                     else:
                         out = self.estimator(torch.cat((x, x), dim=0), mu_in, t.expand(2 * b), cond_in, dt_in)
                     dphi_dt = _combine_cfg(self, out, b, cfg_value, use_cfg_zero_star)

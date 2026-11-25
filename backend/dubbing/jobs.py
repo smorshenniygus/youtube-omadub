@@ -175,6 +175,7 @@ class JobManager:
         self.capacity_probe=capacity_probe if capacity_probe is not None else (gpu_capacity_mib if engine_factory is None else None)
         self.editor=editor;self.quality=quality
         self.idle_timeout=idle_timeout
+        self.closest_partners=str(os.environ.get('VOXDUB_CLOSEST_PARTNERS','0')).strip().lower() in ('1','true','yes','on')
         self.lock=threading.RLock();self.stop=threading.Event();self.jobs={};self.threads=[];self.worker_errors={};self.workers_started=autostart
         self.store=JobStore(self.root, validate)
         for path, job in self.store.load():
@@ -838,8 +839,11 @@ class JobManager:
             cands = [x for x in j['segments'] if x['state'] == 'pending']
             cands.sort(key=lambda x: (x['end'] <= pos, 0 if x['start'] <= pos < x['end'] else 1, x['start']))
             lookahead = 24 if max_segs >= 4 else (18 if max_segs >= 3 else 6)
+            closest = bool(getattr(self, 'closest_partners', True))
+            if closest and s['start'] < pos + 45.0:
+                lookahead = min(lookahead, 10)
             eligible = []
-            for cand in cands[:lookahead]:
+            for rank, cand in enumerate(cands[:lookahead]):
                 with rescue_lock:
                     if (j['id'], cand['id']) in rescue_pending:
                         continue
@@ -864,7 +868,10 @@ class JobManager:
                         continue
                 except OSError:
                     continue
-                eligible.append((ratio, cand))
+                eligible.append((ratio, rank, cand))
+
+            if closest and len(eligible) > 1:
+                eligible.sort(key=lambda e: (e[0] + 0.004 * e[1], e[1]))
 
             chosen = []
             if max_segs >= 4:
@@ -877,7 +884,7 @@ class JobManager:
                     chosen = tight6[:2]
             if not chosen and eligible:
                 chosen = eligible[:1]
-            for _, cand in chosen:
+            for _, _, cand in chosen:
                 cand['state'] = 'generating'
                 cand_payload = copy.deepcopy(cand)
                 cand_payload['job_id'] = j['id']
