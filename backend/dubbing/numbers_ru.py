@@ -38,6 +38,11 @@ _FORMS = (
     (1000000000, 'миллиард миллиарда миллиардов миллиарду миллиардом миллиарде'),
 )
 _VALUES = {word: value for value, forms in _FORMS for word in forms.split()}
+_SINGULAR_SCALES = frozenset((
+    'тысяча', 'тысячу', 'тысячей', 'тысяче',
+    'миллион', 'миллионом', 'миллиону', 'миллионе',
+    'миллиард', 'миллиардом', 'миллиарду', 'миллиарде',
+))
 _WORD = r'(?:' + '|'.join(sorted(_VALUES, key=len, reverse=True)) + r')(?!\w)'
 _PHRASE = re.compile(r'(?<![\w-])(?:минус\s+)?' + _WORD + r'(?:\s+' + _WORD + r')*(?![\w-])', re.IGNORECASE)
 
@@ -82,6 +87,11 @@ def russian_cardinals(text):
             value = _VALUES[word]
             if value >= 1000:
                 if value >= last_scale or (group == 0 and ceiling == 0):
+                    valid = False
+                    break
+                # Plural indefinite scale words ("из тысяч агентов", "десятки миллионов")
+                # without a preceding multiplier are NOT exact 1000 / 1,000,000.
+                if group == 0 and word not in _SINGULAR_SCALES:
                     valid = False
                     break
                 total += (group or 1) * value

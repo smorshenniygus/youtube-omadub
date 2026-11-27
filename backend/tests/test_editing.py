@@ -536,6 +536,18 @@ class EditingTests(unittest.TestCase):
                 'Maybe about 1/5if of researcher time is decent.',
                 '1/5 времени исследователей — неплохо.',
             ),
+            # 6) Indefinite plural Russian scales ("тысяч", "миллионов") alongside exact digit "1000"
+            (
+                'solve Navier-Stokes across a swarm of thousands of agents where 1,000 agents collaborated '
+                'and spent tens of millions of dollars.',
+                'решать задачу Навье — Стокса роем из тысяч агентов, где 1000 агентов вместе доказывали теорему, '
+                'потратив на токены десятки миллионов долларов.',
+            ),
+            # 7) Incidental Russian word matching a required digit ("один из") must never overflow valid Arabic digits
+            (
+                'Option 1 is among the best.',
+                'Вариант 1 — один из лучших.',
+            ),
         ]:
             with self.subTest(source=src, ru=ru):
                 self.assertEqual(

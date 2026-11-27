@@ -315,29 +315,13 @@ def _written_numbers(text):
     return values
 
 
-def _same_numeric_occurrences(text, expected, optional=None):
-    """Polynomial capacity matching, including optional source-written occurrences.
-
-    One dummy per optional occurrence fills that value's capacity or a shared 'used' slot.
-    Only output digits beyond the required count create used slots. This retains required
-    per-value counts even when written and digit quantities share the same value.
-    """
-    options = _number_options(text)
-    optional = optional or Counter()
-    # Count supported Russian word/ordinal/hyphenated forms of required source digits too.
-    # Do not let one mention satisfy two occurrences, or discard an incorrect digit.
-    options += [(value,) for value in russian_cardinals(text) if value in expected]
-    options += [(value,) for value in russian_ordinals(text) if value in expected]
-    options += [(value,) for value in russian_hyphenated_cardinals(text) if value in expected]
-    # Recognize required values in canonical Roman notation (19th -> XIX).
-    # Other Latin tokens may be names, e.g. the platform X, not quantities.
-    options += [(value,) for value in roman_numbers(text) if value in expected]
+def _match_numeric_options(options, expected, optional):
     if not sum(expected.values()) <= len(options) <= sum((expected + optional).values()):
         return False
     capacity = expected + optional
     used = object()
     capacity[used] = len(options) - sum(expected.values())
-    options += [(value, used) for value, count in optional.items() for _ in range(count)]
+    options = list(options) + [(value, used) for value, count in optional.items() for _ in range(count)]
     expected = capacity
     if len(options) != sum(expected.values()):
         return False
@@ -371,6 +355,24 @@ def _same_numeric_occurrences(text, expected, optional=None):
         if not matched:
             return False
     return Counter(assigned.values()) == expected
+
+
+def _same_numeric_occurrences(text, expected, optional=None):
+    """Polynomial capacity matching, including optional source-written occurrences.
+
+    If Arabic digits alone already match source (expected + optional), incidental
+    Russian words (e.g. "один из", "первый", "тысяч") never overflow the match.
+    Otherwise, Russian cardinal/ordinal/hyphenated/Roman forms of required source
+    digits are matched with strict occurrence counts.
+    """
+    digit_options = _number_options(text)
+    optional = optional or Counter()
+    if _match_numeric_options(digit_options, expected, optional):
+        return True
+    options = list(digit_options)
+    for source_fn in (russian_cardinals, russian_ordinals, russian_hyphenated_cardinals, roman_numbers):
+        options += [(value,) for value in source_fn(text) if value in expected]
+    return _match_numeric_options(options, expected, optional)
 
 
 _RUSSIAN_CYRILLIC = frozenset('АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя')
