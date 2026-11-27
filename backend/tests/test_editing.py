@@ -502,4 +502,56 @@ class EditingTests(unittest.TestCase):
         self.assertIn('non_cyrillic_speech', codes)
         self.assertEqual(len(ctx.exception.feedback), 2)
 
+    def test_real_world_numeric_false_positives_pass_while_guards_hold(self):
+        from dubbing.editing import NumericEditingError
+        # 1) Roman numerals in source (GTA VI -> ГТА 6, World War II -> Второй мировой / 2, GTA V -> ГТА 5)
+        for src, ru in [
+            ('Even GTA VI or something?', 'Даже в ГТА 6 или что-то такое?'),
+            ('Even GTA VI or something?', 'Даже в ГТА шесть или что-то такое?'),
+            ('Since World War II.', 'Со времён 2-й мировой.'),
+            ('Play GTA V or Part I.', 'Сыграй в ГТА 5 или часть 1.'),
+            # 2) Spoken Russian negative exponent ("минус 18", "минус 10")
+            (
+                'The small region for this word has a width of 2^-18, whereas the points on the number line '
+                'that are representable with ten bits or fewer are spaced out by 2^-10.',
+                'Область слова имеет ширину 2 в степени минус 18, а точки числовой прямой, '
+                'представимые максимум десятью битами, отстоят на 2 в степени минус 10.',
+            ),
+            # 3) Russian ordinals for required source digits ("19th century, early 20th century")
+            (
+                'How much do you read in the earlier history of mathematics, say, 19th century, early 20th century?',
+                'Много ли вы читаете по истории математики, скажем, девятнадцатого века, начала двадцатого века?',
+            ),
+            (
+                'Welcome to the 21st century.',
+                'Добро пожаловать в двадцать первый век.',
+            ),
+            # 4) Hyphenated phonetic Russian digits ("3b1b.co/talent" -> "три-би-один-би")
+            (
+                'You can try out puzzles at 3b1b.co/talent.',
+                'Попробуйте задачи на три-би-один-би точка ко слэш талент.',
+            ),
+            # 5) YouTube caption glued fraction typo ("1/5if" -> "1/5")
+            (
+                'Maybe about 1/5if of researcher time is decent.',
+                '1/5 времени исследователей — неплохо.',
+            ),
+        ]:
+            with self.subTest(source=src, ru=ru):
+                self.assertEqual(
+                    CodexEditor._validate({'items': [{'id': 'a', 'text_ru': ru}]}, [dict(self.rows[0], source=src)])[0]['text_ru'],
+                    ru,
+                )
+
+        # Negative guards: pronoun "I", platform "X", hallucinated minus sign, and extra digits must still fail closed.
+        for src, bad_ru in [
+            ('I think X is great.', 'Я думаю, 1 и 10 — отлично.'),
+            ('Width is 18 meters.', 'Ширина минус 18 метров.'),
+            ('Full diet rated out of 10.', 'Обычный рацион — 10 из 10.'),
+        ]:
+            with self.subTest(bad_source=src, bad_ru=bad_ru):
+                with self.assertRaises(NumericEditingError) as ctx:
+                    CodexEditor._validate({'items': [{'id': 'a', 'text_ru': bad_ru}]}, [dict(self.rows[0], source=src)])
+                self.assertIn('hint', ctx.exception.feedback[0])
+
 if __name__=='__main__':unittest.main()

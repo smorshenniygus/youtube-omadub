@@ -19,7 +19,7 @@ _DENOMINATORS = {'half':2, 'halves':2, 'third':3, 'thirds':3,
                  'ninth':9, 'ninths':9, 'tenth':10, 'tenths':10}
 _WORD_FRACTION = re.compile(r'\b(\d+|'+'|'.join(_NUMERATORS)+r')[ -]+('+
                             '|'.join(sorted(_DENOMINATORS, key=len, reverse=True))+r')\b', re.I)
-_FRACTION = re.compile(r'(?<![\w/])([-−]?\d+)\s*/\s*(\d+)(?![\w/])')
+_FRACTION = re.compile(r'(?<![\w/])([-−]?\d+)\s*/\s*(\d+)(?![\d/])')
 
 
 def _ratio(numerator, denominator):

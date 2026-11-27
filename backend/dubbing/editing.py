@@ -22,7 +22,7 @@ import unicodedata
 from urllib.parse import urlsplit
 from decimal import Decimal
 from collections import Counter
-from .numbers_ru import russian_cardinals, roman_numbers
+from .numbers_ru import russian_cardinals, roman_numbers, russian_hyphenated_cardinals, russian_ordinals
 from .numeric_notation import canonical_numeric_text, written_fraction_values
 from .editing_contract import (response_schema, EditingError,
                                ResponseEditingError, NumericEditingError)
@@ -219,13 +219,24 @@ def _number_options(text):
     text = canonical_numeric_text(text)
     # Never mix comma and space grouping in one token (e.g. "3,000 300,000" is two numbers).
     pattern = r'(?<!\d)(?:(?<!\w)[-−])?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{1,3}(?:[ \u00a0]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?)'
-    for token in re.findall(pattern, text):
+    for match in re.finditer(pattern, text):
+        token = match.group()
         number = token.replace('−', '-').replace(' ', '').replace('\u00a0', '')
         grouped = re.fullmatch(r'-?\d{1,3}(?:,\d{3})+(?:\.\d+)?', number)
         primary = Decimal(number.replace(',', '') if grouped else number.replace(',', '.')).normalize()
+        # Recognize spoken Russian negative prefix before digits ("2 в степени минус 18" -> -18).
+        spoken_neg = (
+            not number.startswith('-')
+            and primary > 0
+            and bool(re.search(r'(?<!\w)минус\s+$', text[:match.start()], re.IGNORECASE))
+        )
+        if spoken_neg:
+            primary = -primary
         options = [primary]
         if grouped and number.count(',') == 1 and '.' not in number:
             decimal = Decimal(number.replace(',', '.')).normalize()
+            if spoken_neg:
+                decimal = -decimal
             if decimal != primary:
                 options.append(decimal)
         values.append(tuple(options))
@@ -255,18 +266,36 @@ _LEXICAL_QUANTIFIER_RE = re.compile(
     r'(?<![\w-])(?:one\s+single|single|once|twice|double|triple)(?!\w)',
     re.IGNORECASE,
 )
+_SOURCE_ROMAN_MULTI = re.compile(
+    r'(?<![\w-])(II|III|IV|VI|VII|VIII|IX|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX|XXI|XXII|XXIII|XXIV|XXV)(?![\w-])'
+)
+_SOURCE_ROMAN_TITLED_SINGLE = re.compile(
+    r'\b(?:GTA|Part|Act|Chapter|Phase|Tier|Stage|Level|Type|Class|Grade|Model|Version|Mark|Gen|'
+    r'World\s+War|Henry|Louis|Charles|George|Edward|Richard|Elizabeth|Pope|King|Queen|'
+    r'OS|iPhone|Windows|DirectX|Final\s+Fantasy)\s+(I|V|X)(?![\w-])'
+)
+_SOURCE_ROMAN_VALUES = {
+    'I': 1, 'II': 2, 'III': 3, 'IV': 4, 'V': 5, 'VI': 6, 'VII': 7, 'VIII': 8, 'IX': 9, 'X': 10,
+    'XI': 11, 'XII': 12, 'XIII': 13, 'XIV': 14, 'XV': 15, 'XVI': 16, 'XVII': 17, 'XVIII': 18,
+    'XIX': 19, 'XX': 20, 'XXI': 21, 'XXII': 22, 'XXIII': 23, 'XXIV': 24, 'XXV': 25,
+}
 
 
 def _written_numbers(text):
-    """Optional digit evidence for English cardinals and exact lexical quantifiers.
+    """Optional digit evidence for English cardinals, Roman numerals, and exact lexical quantifiers.
 
     Recognizes standard zero..ninety-nine, hundreds, descending thousand/million/billion
-    groups, supported written fractions, and exact unit/multiplier words (single, once,
+    groups, supported written fractions, canonical uppercase Roman numerals (II..XXV and
+    titled I/V/X like 'GTA V', 'Part I'), and exact unit/multiplier words (single, once,
     twice, double, triple). Ordinals, informal 'a hundred', and vague quantities stay
     unsupported. Words may remain Russian words, so these never impose a digit requirement.
     """
     text, fractions = written_fraction_values(canonical_numeric_text(text))
     values = Counter(fractions)
+    for match in _SOURCE_ROMAN_MULTI.finditer(text):
+        values[Decimal(_SOURCE_ROMAN_VALUES[match.group(1)])] += 1
+    for match in _SOURCE_ROMAN_TITLED_SINGLE.finditer(text):
+        values[Decimal(_SOURCE_ROMAN_VALUES[match.group(1)])] += 1
     def lexical(match):
         token = match.group().lower().split()[-1]
         values[Decimal(_LEXICAL_QUANTIFIERS[token])] += 1
@@ -295,9 +324,11 @@ def _same_numeric_occurrences(text, expected, optional=None):
     """
     options = _number_options(text)
     optional = optional or Counter()
-    # Count supported Russian word forms of required source digits too. Do not
-    # let one mention satisfy two occurrences, or discard an incorrect digit.
+    # Count supported Russian word/ordinal/hyphenated forms of required source digits too.
+    # Do not let one mention satisfy two occurrences, or discard an incorrect digit.
     options += [(value,) for value in russian_cardinals(text) if value in expected]
+    options += [(value,) for value in russian_ordinals(text) if value in expected]
+    options += [(value,) for value in russian_hyphenated_cardinals(text) if value in expected]
     # Recognize required values in canonical Roman notation (19th -> XIX).
     # Other Latin tokens may be names, e.g. the platform X, not quantities.
     options += [(value,) for value in roman_numbers(text) if value in expected]
@@ -550,10 +581,30 @@ class _BaseEditor:
             expected_numbers = _numbers(row['source'])
             optional_numbers = _written_numbers(row['source'])
             if not _same_numeric_occurrences(text, expected_numbers, optional_numbers):
+                out_opts = [[format(value, 'f') for value in options] for options in _number_options(text)]
+                req_total = sum(expected_numbers.values())
+                max_total = sum((expected_numbers + optional_numbers).values())
+                if len(out_opts) > max_total:
+                    hint = (
+                        f'Too many digits in output ({len(out_opts)} > allowed {max_total}): '
+                        'do NOT invent extra Arabic digits (e.g. write "из 10" instead of "10 из 10" if source has only one 10); '
+                        'remove extra digits or spell idiomatic phrases in Russian words.'
+                    )
+                elif len(out_opts) < req_total:
+                    hint = (
+                        f'Missing required digit(s) from source ({len(out_opts)} < required {req_total}): '
+                        'preserve every value and occurrence count listed in required_digits.'
+                    )
+                else:
+                    hint = (
+                        'Digit value/sign mismatch against source: match required_digits values and counts exactly '
+                        '(including negative signs where required) and avoid unrequested digits.'
+                    )
                 numeric_feedback.append(dict(id=item['id'],
                     required_digits=[dict(value=format(value, 'f'),count=count) for value,count in expected_numbers.items()],
                     allowed_written_digits=[dict(value=format(value, 'f'),count=count) for value,count in optional_numbers.items()],
-                    output_digit_options=[[format(value, 'f') for value in options] for options in _number_options(text)]))
+                    output_digit_options=out_opts,
+                    hint=hint))
             found[item['id']] = dict(id=item['id'], text_ru=text.strip())
         if numeric_feedback:
             raise NumericEditingError(numeric_feedback + non_cyrillic_feedback)
